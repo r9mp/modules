@@ -3,7 +3,11 @@
     <div
       class="relative bg-white shadow dark:bg-secondary-darkest w-full sticky top-0 z-50 bg-opacity-80 backdrop-filter backdrop-blur-[12px] border-none"
     >
-      <TheSearch ref="theSearch" :search="q" @update:search="v=>q=v" />
+      <TheSearch
+        ref="theSearch"
+        :search="getFilterFromKey('search').value"
+        @update:search="updateFilterValueFromKey('search', $event)"
+      />
     </div>
     <div
       class="pt-10 pb-16 px-3 lg:px-10 lg:pt-24 lg:pb-32 bg-white dark:bg-secondary-darkest dark:bg-secondary-darkest relative"
@@ -43,8 +47,8 @@
           title="Nuxt version"
           subtitle="Show modules working with:"
           :items="versionsList"
-          :selected-item="selectedVersion"
-          @toggle="toggleVersion"
+          :selected-item="getFilterFromKey('version').value"
+          @toggle="updateFilterValueFromKey('version', $event)"
         >
           <template #icon="{ icon }">
             <component :is="icon" class="h-6 w-6 mr-2 inline-block" />
@@ -55,36 +59,20 @@
         <FilterButtons
           title="Categories"
           :items="categoriesList"
-          :selected-item="selectedCategory"
-          @toggle="toggleCategory"
+          :selected-item="getFilterFromKey('category').value"
+          @toggle="updateFilterValueFromKey('category', $event)"
         />
       </div>
       <!-- Main -->
       <div class="col-span-4">
         <!-- Filter -->
-        <div class="h-10 -mt-5 flex items-center gap-1">
-          <template
+        <div class="h-10 -mt-5">
+          <TheCurrentFilters
             v-if="displayFiltersBlock"
-          >
-            <div>Filter{{ nbFiltersApplied > 1 ? 's' : '' }}</div>
-            <FilterLabel v-if="selectedVersion" @close="selectedVersion = null">
-              {{ getVersionFromKey(selectedVersion).label }}
-            </FilterLabel>
-            <FilterLabel v-if="selectedCategory" @close="selectedCategory = null">
-              {{ selectedCategory }}
-            </FilterLabel>
-            <FilterLabel v-if="q" @close="q = ''">
-              {{ q }}
-            </FilterLabel>
-            <a
-              href="/"
-              class="ml-2 opacity-70 hover:opacity-100 inline-flex items-center gap-1"
-              @click.prevent="clearFilters"
-            >
-              <UnoIcon class="i-carbon-filter-remove" />
-              Clear filter{{ nbFiltersApplied > 1 ? 's' : '' }}
-            </a>
-          </template>
+            :current-filters="currentFilters"
+            @clear-one="clearOneFilter"
+            @clear-all="clearFilters"
+          />
         </div>
 
         <!-- Result, Sort -->
@@ -94,7 +82,7 @@
             module{{ filteredModules.length > 1 ? 's' : '' }} found
           </div>
           <div>
-            <div v-show="!q" class="flex items-center text-forest-night">
+            <div v-show="!getFilterFromKey('search').value" class="flex items-center text-forest-night">
               <label
                 for="options-menu"
                 class="mr-3"
@@ -201,29 +189,28 @@ export default {
   },
   data () {
     return {
-      q: '',
+      filters: [
+        { key: 'search', value: '' },
+        { key: 'category', value: '' },
+        { key: 'version', value: '' }
+      ],
       orderBy: ORDERS.DESC,
       sortBy: 'downloads',
       sortByMenuVisible: false,
-      selectedCategory: null,
-      selectedVersion: null,
       moduleLoaded: MODULE_INCREMENT_LOADING,
       CATEGORIES_ICONS,
       versionsList: VERSIONS
     }
   },
   computed: {
+    currentFilters () {
+      return this.filters.filter(filter => !!filter.value)
+    },
     displayFiltersBlock () {
-      return this.selectedCategory || this.q || this.selectedVersion
+      return this.nbFiltersApplied >= 1
     },
     nbFiltersApplied () {
-      let nbFilters = 0
-
-      if (this.selectedCategory) { nbFilters++ }
-      if (this.selectedVersion) { nbFilters++ }
-      if (this.q) { nbFilters++ }
-
-      return nbFilters
+      return this.filters.filter(filter => !!filter.value).length
     },
     categoriesList () {
       const categoriesList = []
@@ -239,17 +226,20 @@ export default {
     },
     filteredModules () {
       let modules = this.modules
-      if (this.q) {
-        modules = this.fuse.search(this.q).map(r => r.item)
+      const search = this.getFilterFromKey('search').value
+      if (search) {
+        modules = this.fuse.search(search).map(r => r.item)
       } else {
         // Sort only if no search
         modules.sort((a, b) => sort(a[this.sortBy], b[this.sortBy], this.orderBy === ORDERS.ASC))
       }
-      if (this.selectedCategory) {
-        modules = modules.filter(module => module.category === this.selectedCategory)
+      const category = this.getFilterFromKey('category').value
+      if (category) {
+        modules = modules.filter(module => module.category === category)
       }
-      if (this.selectedVersion) {
-        modules = modules.filter(module => module.compatibility[this.selectedVersion] === 'working')
+      const version = this.getFilterFromKey('version').value
+      if (version) {
+        modules = modules.filter(module => module.compatibility[version] === 'working')
       }
 
       return modules
@@ -279,14 +269,11 @@ export default {
     }
   },
   watch: {
-    selectedCategory () {
-      this.syncURL()
-    },
-    selectedVersion () {
-      this.syncURL()
-    },
-    q () {
-      this.syncURL()
+    filters: {
+      deep: true,
+      handler () {
+        this.syncURL()
+      }
     },
     orderBy () {
       this.syncURL()
@@ -295,7 +282,7 @@ export default {
       this.syncURL()
     },
     $route () {
-      this.applyURLFilters()
+      this.applyURLQueryParams()
     }
   },
   mounted () {
@@ -315,7 +302,7 @@ export default {
     const index = Fuse.createIndex(fuseOptions.keys, this.modules)
     this.fuse = new Fuse(this.modules, fuseOptions, index)
 
-    this.applyURLFilters()
+    this.applyURLQueryParams()
 
     // In case of desktop, auto focus the search input
     if (!isMobile()) {
@@ -329,79 +316,57 @@ export default {
     window.removeEventListener('keypress', this.searchFocusListener)
   },
   methods: {
+    getFilterFromKey (key) {
+      return this.filters.find(filter => filter.key === key)
+    },
+    updateFilterValueFromKey (key, value) {
+      const filter = this.getFilterFromKey(key)
+      filter.value = value
+    },
+    getFiltersKeys () {
+      return this.filters.map(filter => filter.key)
+    },
     getVersionFromKey (key) {
       const version = this.versionsList.find(version => version.key === key)
 
       return version ?? {}
     },
-    toggleCategory (category) {
-      if (this.selectedCategory === category) {
-        this.selectedCategory = null
-        return
-      }
-      this.selectedCategory = category
-    },
-    toggleVersion (version) {
-      if (this.selectedVersion === version) {
-        this.selectedVersion = null
-        return
-      }
-      this.selectedVersion = version
-    },
     clearFilters () {
-      this.selectedCategory = null
-      this.selectedVersion = null
-      this.q = null
+      this.filters.forEach((filter) => { filter.value = '' })
       this.moduleLoaded = MODULE_INCREMENT_LOADING
     },
+    clearOneFilter (key) {
+      this.getFilterFromKey(key).value = ''
+    },
     syncURL () {
-      const url = this.$route.path
-      let query = ''
       this.resetModuleLoaded()
 
-      if (this.q) {
-        query += `?q=${this.q}`
-      }
+      const query = {}
+      this.filters.forEach((filter) => {
+        if (filter.value) {
+          query[filter.key] = filter.value
+        }
+      })
 
       if (this.orderBy !== ORDERS.DESC) {
-        query += `${query ? '&' : '?'}orderBy=${this.orderBy}`
+        query.orderBy = this.orderBy
       }
-
       if (this.sortBy !== FIELDS.DOWNLOADS) {
-        query += `${query ? '&' : '?'}sortBy=${this.sortBy}`
+        query.sortBy = this.sortBy
       }
 
-      if (this.selectedCategory) {
-        query += `${query ? '&' : '?'}category=${this.selectedCategory}`
-      }
-
-      if (this.selectedVersion) {
-        query += `${query ? '&' : '?'}version=${this.selectedVersion}`
-      }
-
-      window.history.pushState('', '', `${url}${query}`)
+      this.$router.push({ path: this.$route.path, query })
     },
-    applyURLFilters () {
-      const { q, sortBy, orderBy, category, version } = this.$route.query
-      if (q) {
-        this.q = q
-      }
+    applyURLQueryParams () {
+      const { sortBy, orderBy } = this.$route.query
+      if (sortBy) { this.sortBy = sortBy }
+      if (orderBy) { this.orderBy = orderBy }
 
-      if (sortBy) {
-        this.sortBy = sortBy
-      }
-
-      if (orderBy) {
-        this.orderBy = orderBy
-      }
-
-      if (category) {
-        this.toggleCategory(category)
-      }
-
-      if (version) {
-        this.toggleVersion(version)
-      }
+      this.getFiltersKeys().forEach((filter) => {
+        if (this.$route.query[filter]) {
+          this.updateFilterValueFromKey(filter, this.$route.query[filter])
+        }
+      })
     },
     toggleOrderBy () {
       this.orderBy = (this.orderBy === ORDERS.ASC) ? ORDERS.DESC : ORDERS.ASC
