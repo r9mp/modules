@@ -172,7 +172,7 @@
 import LazyHydrate from 'vue-lazy-hydration'
 import Fuse from 'fuse.js/dist/fuse.basic.esm'
 import { isMobile } from '~/utils/detectUserAgent.ts'
-import { CATEGORIES_ICONS, FIELDS, MODULE_INCREMENT_LOADING, ORDERS, VERSIONS } from '~/composables/constants'
+import { CATEGORIES_ICONS, FIELDS, FUSE_OPTIONS, MODULE_INCREMENT_LOADING, ORDERS, VERSIONS } from '~/composables/constants'
 import { fetchModules } from '~/composables/fetch'
 
 const sort = (a, b, asc) => asc ? a - b : b - a
@@ -299,21 +299,8 @@ export default {
     }
   },
   mounted () {
-    const fuseOptions = {
-      threshold: 0.1,
-      keys: [
-        'name',
-        'npm',
-        'category',
-        'maintainers.name',
-        'maintainers.github',
-        'description',
-        'repo',
-        'tags'
-      ]
-    }
-    const index = Fuse.createIndex(fuseOptions.keys, this.modules)
-    this.fuse = new Fuse(this.modules, fuseOptions, index)
+    const index = Fuse.createIndex(FUSE_OPTIONS.keys, this.modules)
+    this.fuse = new Fuse(this.modules, FUSE_OPTIONS, index)
 
     this.applyURLFilters()
 

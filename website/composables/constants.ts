@@ -37,3 +37,17 @@ export const FIELDS = {
 }
 
 export const MODULE_INCREMENT_LOADING = 12
+
+export const FUSE_OPTIONS = {
+  threshold: 0.1,
+  keys: [
+    'name',
+    'npm',
+    'category',
+    'maintainers.name',
+    'maintainers.github',
+    'description',
+    'repo',
+    'tags'
+  ]
+}
